@@ -136,7 +136,7 @@ if __name__=="__main__":
             if(outputs[outputName][prefix] == ""):
                 outputBase = tech
 
-            for name in msetools.CSVNames:
+            for name in lib_mse.CSVNames:
                 outputCSV.append(opts.output+os.path.sep+outputBase+name)
 
             stepsLocal = steps
@@ -148,5 +148,5 @@ if __name__=="__main__":
             print("[INFO] Compute All metric for: ", tech, "(ref: ", opts.reference, ")")
             print("Dump info inside: "+str(outputCSV))
             filename =  opts.input + os.path.sep + filename
-            msetools.computeMSEAll(filename, nbImages, stepsLocal, opts.reference, percentage, outputCSV, mult, opts.mask)
+            lib_mse.computeMSEAll(filename, nbImages, stepsLocal, opts.reference, percentage, outputCSV, mult, opts.mask)
     

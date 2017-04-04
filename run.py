@@ -31,7 +31,7 @@ parser.add_option('-g','--xmlgen', help="enable scene generation (XML)", default
 parser.add_option('-c','--compute', help="enable scene running mts (Rendering)", default=False, action="store_true")
 parser.add_option('-p','--pack', help="enable pack results (Pack, MSE)", default=False, action="store_true")
 parser.add_option('-P','--packhtml', help="enable pack results (HTML)", default=False, action="store_true")
-parser.add_option('-R','--avoidMETRIC', help="disable metric computation", default=False, action="store_true")
+parser.add_option('-X','--avoidMETRIC', help="disable metric computation", default=False, action="store_true")
 parser.add_option('-H','--hackMETRIC', help="enable hack metric", default=False, action="store_true")
 parser.add_option('-C','--cluster', help="enable cluster running mode", default=False, action="store_true")
 
@@ -39,7 +39,7 @@ parser.add_option('-e','--exposure', help="exposure value", default="0")
 parser.add_option('-O','--htmlsuffix', help="html suffix", default="0")
 
 parser.add_option('-G','--generator', help="python file for generating XML", default="scene/example/generatorEx.py")
-
+parser.add_option('-R','--rules', help="rules for packing files", default="results/example/rulesEx.xml")
 # Technique
 parser.add_option('-t','--technique', help="technique", default="")
  
@@ -165,7 +165,7 @@ if(opts.pack):
                    "-r", opts.reference,
                    "-s", opts.dumpiter,
                    "-p", pourcentage,
-                   "-c", "results/example/rulesEx.xml"]
+                   "-c", opts.rules]
         command += techFlag
         launch(command)
 
