@@ -75,7 +75,7 @@ if(opts.xmlgen):
 
     if(opts.variation != ""):
         # We want a variation, run it
-        command = [PYTHON_NAME, "scene/variation_scenes.py",
+        command = [PYTHON_NAME, "scene/lib_variations.py",
                    "-i", currentScenePath + os.path.sep + opts.scenename,
                    "-r", # Remove
                    "-c", opts.variation]
