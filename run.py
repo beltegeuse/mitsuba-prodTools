@@ -37,9 +37,8 @@ parser.add_option('-C','--cluster', help="enable cluster running mode", default=
 
 parser.add_option('-e','--exposure', help="exposure value", default="0")
 parser.add_option('-O','--htmlsuffix', help="html suffix", default="0")
-
 parser.add_option('-G','--generator', help="python file for generating XML", default="scene/example/generatorEx.py")
-
+parser.add_option('-U','--rules', help="metric computation rules", default="results/example/rulesEx.xml")
 # Technique
 parser.add_option('-t','--technique', help="technique", default="")
  
@@ -165,7 +164,7 @@ if(opts.pack):
                    "-r", opts.reference,
                    "-s", opts.dumpiter,
                    "-p", pourcentage,
-                   "-c", "results/example/rulesEx.xml"]
+                   "-c", opts.rules]
         command += techFlag
         launch(command)
 
