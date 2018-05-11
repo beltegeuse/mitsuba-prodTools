@@ -5,6 +5,14 @@ import math
 import shutil
 import sys
 import datetime
+import logging
+import json
+
+import matplotlib.pyplot as plt
+import colormaps as cmaps
+
+plt.register_cmap(name='viridis', cmap=cmaps.viridis)
+plt.set_cmap(cmaps.viridis)
 
 # Python for reading XML files
 import xml.etree.ElementTree as ET
@@ -26,6 +34,10 @@ except ImportError:
 ## HARD CODE HTML
 ##########################################
 ##########################################
+TECHMETRIC="""iter: %%ITER%%
+relMSE: %%relMSE%%"""
+
+CHARTJS = True
 PRODMOD = True
 REMOVE_TMP = False
 ABOVE_CURVES = "<p></p>"
@@ -39,10 +51,17 @@ htmlHead = """
 <meta http-equiv="Content-Language" content="English">
 
 <script type="text/javascript" src="./js/jquery.min.js"></script>
-<script type="text/javascript" src="./js/image-compare.js"></script>
-<script src="./js/jquery.flot.js" type="text/javascript" language="javascript"></script>
+<script type="text/javascript" src="./js/image-compare.js"></script>"""
+
+if(CHARTJS):
+    htmlHead += """<script type="text/javascript" src="./js/Chart.min.js"></script>"""
+else:
+    htmlHead += """<script src="./js/jquery.flot.js" type="text/javascript" language="javascript"></script>
 <script src="./js/jquery.flot.axislabels.js" type="text/javascript" language="javascript"></script>
 <script src="./js/jquery.flot.dashes.js" type="text/javascript" language="javascript"></script>
+"""
+
+htmlHead += """<script type="text/javascript" src="./js/Chart.min.js"></script>
 
 <script>
     $(window).resize(function()
@@ -61,8 +80,6 @@ htmlHead = """
 
 <script type="text/javascript">
     $(function () {
-      $('.vert_compare').qvertcompare();
-      $('.three_compare').qthreecompare();
       $('.cross_compare').qcrosscompare();
     });
     </script>
@@ -178,6 +195,10 @@ html4Way = """
 htmlCaption = """
 <div class="caption"><b>%%TITLE%%</b>%%DESC%%</div>"""
 
+#### Create logging system
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 def comparison4Way(techniques, imgAlias, output, w, h):
     """
     This method will fill the HTML pattern to generate meanfull GHMLT
@@ -207,14 +228,14 @@ class HTMLRow():
     def __init__(self):
         self.el = []
         self.titles = []
-    
+
     def add(self, e, title):
         self.el.append(e)
         self.titles.append(title)
-    
+
     def generateHTML(self):
         if len(self.el) == 0:
-            print("WARN: Empty row, normal ?")
+            logger.warning("HTMLRow: Empty row, normal")
         elif len(self.el) == 1:
             return self.el[0]
         else:
@@ -235,7 +256,7 @@ def readOptional(e, name, default=""):
 
 class Technique:
     def __init__(self, name, filename,
-                reference, prefix): # Optional informations
+                 reference="Reference", prefix=""): # Optional informations
         self.name = name
         self.filename = filename
 
@@ -287,14 +308,24 @@ class Compare:
 
         # Append to the compare entry all the technique associated to him
         for el in e.iter('Element'):
-            if(el.attrib["name"] in techDict):
-                c.techniques.append(techDict[el.attrib["name"]])
+            if(el.attrib["technique"] in techDict):
+                c.techniques.append(techDict[el.attrib["technique"]])
             else:
-                print("ERROR in compare: " + el.attrib["name"]  + " (not exist)")
+                logger.critical("Compare: " + el.attrib["technique"]  + " (not exist)")
                 sys.exit(-1)
         return c
 
-def readXMLComparisons(file):
+def checkVersion(root):
+    if(("version" in  root.attrib) and (root.attrib["version"] != "0.1")):
+        logger.info("""=====================================")
+        Old version of HTML configure file.
+        Need to apply the changes of this new version.
+        Please go to the production document for the required changes
+        url: https://docs.google.com/document/d/1p1YhIXInvgj8CZoDc00cbVIqAWkmKpdRrDDfju7Iv7k/edit?usp=sharing
+        =====================================""")
+        raise Exception("Too old XML configuration version")
+
+def readXMLComparisons(opts, file):
     """
     This method will read the XML files to extract which
     :param file: The configuration file
@@ -302,14 +333,51 @@ def readXMLComparisons(file):
     """
     tree = ET.parse(file)
     root = tree.getroot()
-    
+
+    # Check the version
+    checkVersion(root)
+
+    automaticTechniques = False
+    techniquesXML = root.find('./Techniques')
+    if("automatic" in techniquesXML.attrib):
+        automaticTechniques = (techniquesXML.attrib["automatic"] == "true")
+
+    automaticComp = False
+    comparisonsXML = root.find('./Comparisons')
+    if("automatic" in comparisonsXML.attrib):
+        automaticComp = (comparisonsXML.attrib["automatic"] == "true")
+
+
     techDict = {}
     comps = []
+    if(automaticTechniques):
+        rules = []
+        import re
+        for r in techniquesXML.iter('Rule'):
+            rules.append((re.compile(r.attrib["pattern"]),
+                          r.attrib["prefix"]))
 
-    # Read all techniques and create a dictionary
-    for tech in root.iter('Technique'):
-        newTech = Technique.parseXMLEntry(tech)
-        techDict[newTech.name] = newTech
+        import glob
+        allTech = glob.glob(opts.input+os.path.sep+"*_time.csv")
+        allTechName = [n.replace(opts.input+os.path.sep,"").replace("_time.csv", "") for n in allTech]
+        logger.info("List of all techniques: %s", str(allTechName))
+
+        # Add reference
+        techDict["Reference"] = Technique("Reference", "Ref", "Reference", "")
+
+        # Add the rest of the techniques
+        for n in allTechName:
+            currPrefix = ""
+            for s,p in rules:
+                if(s.match(n)):
+                    currPrefix = p
+                    break
+            techDict[n] = Technique(n, n, "Reference", currPrefix)
+    else:
+        # Read all techniques and create a dictionary
+        for tech in root.iter('Technique'):
+            newTech = Technique.parseXMLEntry(tech)
+            techDict[newTech.name] = newTech
 
     # Here it can be little tricky. Indeed, we need to associated
     # at each image the reference to use it for bias and other computations
@@ -317,19 +385,39 @@ def readXMLComparisons(file):
         objTech = techDict[tech]
         objTech.reference = techDict[objTech.reference]
 
-    # --- Load comparison table
-    for compEntry in root.iter('Compare'):
-        comps.append(Compare.parseXMLEntry(compEntry, techDict))
+    if(automaticComp):
+        # Sort all the techniques names to get coherent comparison
+        allTechName = [k for k in techDict.keys()]
+        allTechName.sort()
+
+        # Create all the necessary entries
+        idTech = 0
+        while idTech < len(allTechName):
+            # Gather all indices tech name entrires (looping if exceeding)
+            localIDs = [(idTech+i) % len(allTechName) for i in range(3)]
+            idTech+=3
+
+            # Create the entry by always add reference technique
+            # and the rest of the techniques
+            c = Compare("Automatic comparison", " ".join([allTechName[lID] for lID in localIDs]))
+            c.techniques.append(techDict["Reference"])
+            for lID in localIDs:
+                c.techniques.append(techDict[allTechName[lID]])
+            comps.append(c)
+    else:
+        # --- Load comparison table
+        for compEntry in root.iter('Compare'):
+            comps.append(Compare.parseXMLEntry(compEntry, techDict))
 
     return techDict, comps
 
 class SectionCurve:
-    
+
     def __init__(self, title, description):
         self.title = title
         self.description = description
         self.curves = []
-        
+
     def addCurves(self, curve):
         self.curves.append(curve)
 
@@ -340,93 +428,229 @@ class SectionCurve:
             description = e.attrib["desc"]
         return SectionCurve(e.attrib["name"], description)
 
-    def HTMLcode(self, rep, entries, output, clampTime, step):
+    def HTMLcode(self, rep, entries, output, clampTime, step, techDict):
         # Create HTML code
         s = "<h2>"+self.title+"</h2>"
         if(self.description != ""):
             s += "<p>"+self.description+"</p>"
-        
+
         # Generate JS
         for c in self.curves:
-            textJS = c.generateJS(rep, entries, clampTime, step)
-            
+            textJS = c.generateJS(rep, entries, clampTime, step, techDict)
+
             # Write file
             file = open(output+os.path.sep+c.getName()+".js", "w")
             file.write(textJS)
             file.close()
-            
-            s += '<script src="'+c.getName()+".js"+'" type="text/javascript" language="javascript"></script>'
-            s += '<div id="'+c.getName()+'" style="width:960px;height:540px"></div>'
+
+            s += "\n"
+            if CHARTJS:
+                s += '<button onclick="'+c.getName()+'Hide()">Hide all curves</button>'
+                s += '<button onclick="'+c.getName()+'Show()">Show all curves</button>'
+                s += '<div style="width:960px;height:540px;background-color:#d8d8d8"><canvas id="'+c.getName()+'"></canvas></div>\n'
+                s += '<script src="'+c.getName()+".js"+'" type="text/javascript" language="javascript"></script>'
+            else:
+                s += '<script src="'+c.getName()+".js"+'" type="text/javascript" language="javascript"></script>'
+                s += '<div id="'+c.getName()+'" style="width:960px;height:540px"></div>'
             if ABOVE_CURVES != "":
                 s += ABOVE_CURVES
         return s
-    
+
 class Curve:
     def __init__(self, name, xlabel, ylabel, log):
         self.csv = name
         self.xlabel = xlabel
         self.ylabel = ylabel
         self.log = log
-        
+
     @staticmethod
     def parseXMLEntry(e):
         return Curve(e.attrib["csv"],
                      e.attrib["xlabel"],
                      e.attrib["ylabel"],
                      e.attrib["log"] == "true")
-    
+
     def getName(self):
         if self.log:
             return "log"+self.csv
         else:
             return self.csv
-        
-    def generateJS(self, rep, entries, clampTime, step):
+
+    def __findEntry(self, entries, name):
+
+        idEntry = 0
+        logger.debug("Search: ", name)
+        while(idEntry < len(entries) and entries[idEntry].technique != name):
+            logger.debug("Skip: ", entries[idEntry].technique)
+            idEntry += 1
+        if(idEntry < len(entries)):
+            logger.debug("FOUND !")
+        else:
+            logger.error("Impossible to found %s in %s", name, str([e.technique for e in entries]))
+            raise Exception("Problem to found the corresponding entry: " +  name)
+        return idEntry
+
+    def generateJS(self, rep, entries, clampTime, step, techDict):
         # Create the list of techniques filenames
         listCSVFiles = []
         for e in entries:
+            filenameCSV = techDict[e.technique].filename
             if(e.time == ""):
-                listCSVFiles.append(e.technique)
+                listCSVFiles.append(filenameCSV)
             else:
-                listCSVFiles.append(e.technique+","+e.time)
-        print(listCSVFiles)
-        
+                listCSVFiles.append(filenameCSV+","+e.time)
+        logger.debug(listCSVFiles)
+
         # Read all associated CSV
         useLog = self.log
         if self.csv == "time":
             # Special case when we need to display rendering time
             useLog = False
 
+        if CHARTJS:
+            useLog = False
+
         techniques = debug_show.readAllTechniques(listCSVFiles, rep, step, useLog,  basey='_'+self.csv+'.csv')
-        
-        # Generate JS file
-        entryOrder = []
-        totalText = '$(function() { $.plot("#'+self.getName()+'",['
+        # Rewritte technique name
+        fileToName = {v.filename:k for k,v in techDict.items()}
+        for t in techniques:
+            t.name = fileToName[t.name]
+
+        # Do the clamping
         for i in range(len(techniques)):
             t = techniques[i]
             if(clampTime != -1):
                 if not self.log:
                     t.clampTime(clampTime)
-                else:    
+                else:
                     t.clampTime(math.log10(float(clampTime)))
 
+        # Generate the JS content
+        if CHARTJS:
+            return self.generateJS_chart(entries, techniques)
+        else:
+            return self.generateJS_flot(entries, techniques)
+
+    def generateJS_chart(self, entries, techniques):
+        totalText = "var ctx = document.getElementById('"+self.getName()+"').getContext('2d');\n"
+        totalText += "var chart"+self.getName()+" = new Chart.Scatter(ctx, {\n"
+        totalText += "  type: 'line', \n"
+        totalText += "  data: {\n"
+        totalText += "      datasets:["
+
+        for i in range(len(techniques)):
+            t = techniques[i]
             # Find the correspondant technique
-            idEntry = 0
-            print("Search: ", t.name)
-            while(idEntry < len(entries) and entries[idEntry].technique != t.name):
-                print("Skip: ", entries[idEntry].technique)
-                idEntry += 1
-            if(idEntry < len(entries)):
-                print("FOUND !")
+            idEntry = self.__findEntry(entries, t.name)
+
+            totalText += '\n'
+            totalText += '      {'
+            totalText += '      label: "'+entries[idEntry].name+'",\n'
+            totalText += '      borderColor: "'+entries[idEntry].color+'",\n'
+            totalText += '      backgroundColor: "'+entries[idEntry].color+'",\n'
+            totalText += '      fill: false,\n'
+
+            if(entries[idEntry].dashed):
+                totalText += '      borderDash: [5, 5],\n'
+
+            # Get the data
+            data = None
+            if self.csv == "time":
+                data = t.generateConstantDataX()
             else:
-                raise "Problem to found the corresponding entry: " +  t.name
+                data = t.generatePairData()
+
+            # add the data inside the JS
+            totalText += '      data:['
+            for iD in range(len(data)):
+                x, y = data[iD]
+                totalText += "\n"
+                totalText += "      {x: "+str(x)+", y: "+str(y)+"}"
+                if(iD != len(data)-1):
+                    totalText += ","
+            totalText += "]"
+            totalText += "}"
+
+            if(i != len(techniques) - 1):
+                totalText += ",\n"
+
+        # Close dataset and data
+        totalText += "]}\n"
+
+        # Options
+        totalText += ","
+        totalText += "options: "
+
+        dictOptions = {}
+        dictOptions["scales"] = {"xAxes":[{}],"yAxes":[{}]}
+
+        dictXAxis =  dictOptions["scales"]["xAxes"][0]
+        dictYAxis =  dictOptions["scales"]["yAxes"][0]
+
+        dictXAxis["display"] = True
+        dictYAxis["display"] = True
+        dictXAxis["scaleLabel"] = {}
+        dictYAxis["scaleLabel"] = {}
+        dictXAxis["scaleLabel"]["labelString"] = "'"+self.xlabel+"'"
+        dictYAxis["scaleLabel"]["labelString"] = "'"+self.ylabel+"'"
+        dictXAxis["scaleLabel"]["fontSize"] = 14
+        dictYAxis["scaleLabel"]["fontSize"] = 14
+        dictXAxis["scaleLabel"]["display"] = True
+        dictYAxis["scaleLabel"]["display"] = True
+
+
+        if(self.log):
+            dictXAxis["type"] = "'logarithmic'"
+            dictYAxis["type"] = "'logarithmic'"
+
+        # Scales
+        totalText += json.dumps(dictOptions).replace('"', '')
+
+        if(self.log):
+            pass
+
+
+        # Close the end JS
+        totalText += '});'
+
+        # Function for show or hide all the curves
+        totalText += """
+        function """+self.getName()+"""Hide() {
+    var ci = chart"""+self.getName()+""";
+	var nbEntries = ci.data.datasets.length;
+	for(var i = 0; i < nbEntries; i++) {
+		ci.data.datasets[i].hidden = true;
+	}
+	ci.update()
+}
+
+function """+self.getName()+"""Show() {
+    var ci = chart"""+self.getName()+""";
+	var nbEntries = ci.data.datasets.length;
+	for(var i = 0; i < nbEntries; i++) {
+		ci.data.datasets[i].hidden = false;
+	}
+	ci.update()
+}
+        """
+
+        return totalText
+
+    def generateJS_flot(self, entries, techniques):
+        # Generate JS file
+        entryOrder = []
+        totalText = '$(function() { $.plot("#'+self.getName()+'",['
+        for i in range(len(techniques)):
+            t = techniques[i]
+            # Find the correspondant technique
+            idEntry = self.__findEntry(entries, t.name)
             entryOrder.append(idEntry)
 
-            print(entries[idEntry].name, t.name)
+            logger.debug(entries[idEntry].name, t.name)
             # Data row
-            
+
             totalText += "{data: "
-            
+
             if self.csv == "time":
                 if self.log:
                     totalText += str(t.generateConstantDataXLog())
@@ -438,17 +662,17 @@ class Curve:
             if(entries[idEntry].dashed):
                 totalText += ', dashes: { show: true }'
             totalText += '}'
-            
+
             if(t != techniques[-1]):
                 totalText += ",\n"
         totalText += "]"
-        
+
         # Color dicts
         totalText += ",{colors: ["
         for idEntry in entryOrder:
             totalText += '"' + entries[idEntry].color + '", '
         totalText += ']'
-        
+
         totalText += """, xaxis: {
             axisLabel: '"""+self.xlabel+"""',
             axisLabelUseCanvas: true,
@@ -465,10 +689,9 @@ class Curve:
             axisLabelFontFamily: 'Ubuntu, Calibri, Lucida Grande',
             axisLabelPadding: 10,
         }});\n"""
-        
+
         # Close the end JS
-        totalText += '});' 
-        
+        totalText += '});'
         return totalText
 
 class CurveEntry:
@@ -478,18 +701,25 @@ class CurveEntry:
         self.technique = technique
         self.dashed = dashed
         self.time = time
+
     @staticmethod
     def parseXMLEntry(e):
         time = ""
         if("time" in e.attrib):
             time = e.attrib["time"]
-        return CurveEntry(e.attrib["name"], 
+
+        technique = e.attrib["technique"]
+        name = e.attrib["technique"]
+        if("rename" in e.attrib):
+            name = e.attrib["rename"]
+
+        return CurveEntry(name,
                           e.attrib["color"],
-                          e.attrib["technique"],
+                          technique,
                           e.attrib["dashed"] == "true",
                           time)
 
-def readXMLCurves(file):
+def readXMLCurves(file, techDict):
     """
     Function to read curves config
     :param file:
@@ -498,22 +728,125 @@ def readXMLCurves(file):
     tree = ET.parse(file)
     root = tree.getroot()
 
+    checkVersion(root)
+
     entries = []
     sections = []
-    
-    for e in root.findall('./Curves/Entries/Entry'):
-        entries.append(CurveEntry.parseXMLEntry(e))
-    
+
+    automaticList = False
+    entriesXML = root.find('./Curves/Entries')
+    if("automatic" in entriesXML.attrib):
+        automaticList = (entriesXML.attrib["automatic"] == "true")
+
+    if automaticList:
+        # Precomputed color map for the automatic mode
+        colors = ["#DAF7A6", "#FFC300", "#FF5733", "#C70039", "#900C3F", "#581845", "#B84B4B", "#BAB14D", "#568A73",
+                  "#565E8A", "#85568A", "#556270", "#4ECDC4", "#C7F464", "#FF6B6B", "#C44D58"]
+        iC = 0
+        Dashed = False # Use Dashed to extend the possible colors
+
+        # pre sort the names
+        techName = [k for k,v in techDict.items()]
+        techName.sort()
+
+        # ignore the classical listing
+        for k in techName:
+            entries.append(CurveEntry(k, colors[iC % len(colors)], k, Dashed, ""))
+            iC += 1
+            if(iC == len(colors)):
+                Dashed = not(Dashed)
+    else:
+        # Use the classical listing
+        for e in root.findall('./Curves/Entries/Entry'):
+            entries.append(CurveEntry.parseXMLEntry(e))
+
     for e in root.findall('./Curves/Section'):
         sections.append(SectionCurve.parseXMLEntry(e))
         for f in e.iter('Curve'):
             sections[-1].addCurves(Curve.parseXMLEntry(f))
 
+    # Add for debug the rendering time section
+    sections.append(SectionCurve("Rendering time", "Number of second for each iterations"))
+    sections[-1].addCurves(Curve("time", "Iterations", "Rendering time", False))
+
     return entries, sections
+
+def copyPixtoPil(pix, im):
+    pInt = [(int(c[0]*255),int(c[1]*255),int(c[2]*255)) for c in pix]
+    im.putdata(pInt)
+
+def readImage(opts, black_img,
+              filenameHDR, filenameRefHDR,
+              filenameIMG, typeOp="tonemap", exposure=0.0):
+    """Function responsible to read the image and to do the proper
+    image operation. For now this function takes a lot of different parameters
+    for the different operation."""
+    #TODO: use kargs** for make the function more flexible
+
+    # If there is no HDR, associate a black image
+    if(not os.path.exists(filenameHDR)):
+        logger.critical("NO HDR FILE FOUND FOR: "+filenameHDR)
+        return black_img
+
+    if(not opts.skip):
+        # Sometime, we do not want to generates the images...
+        # So we may want skip it !
+        if(typeOp == "tonemap"):
+            (width,height),p = rgbe.io.read(filenameHDR)
+            rgbe.utils.applyExposureGamma(p, exposure, 2.2)
+
+            im = Image.new("RGB", (width,height))
+            copyPixtoPil(p, im)
+            logger.info("Save "+filenameIMG)
+            im.save(filenameIMG, optimize=True)
+        elif(typeOp == "bias"):
+            scaleNP = 1.0
+            if(exposure != 0.0):
+                scaleNP = 1.0 / exposure
+            paper_figures.saveNPImageRef(filenameHDR,filenameRefHDR,
+                                           filenameIMG, scaleNP)
+        elif(typeOp == "error"):
+            ################ COMPUTE ERROR
+            (wRef,hRef),pRef = rgbe.io.read(filenameRefHDR)
+            (width,height),pixelsHDR = rgbe.io.read(filenameHDR)
+            if(exposure != 0.0):
+                rgbe.utils.applyExposureGamma(pRef, exposure, 1.0)
+                rgbe.utils.applyExposureGamma(pixelsHDR, exposure, 1.0)
+            # --- Change data to compute norm
+            pRef = [paper_figures.lum(p) for p in pRef]
+            pixelsHDR = [paper_figures.lum(p) for p in pixelsHDR]
+            # --- Compute relative error
+            for i in range(len(pRef)):
+                pixelsHDR[i] = 0.0 if pRef[i] == 0.0 else abs(pRef[i] - pixelsHDR[i])/pRef[i]
+            # --- Remake 3 channel
+            pixelsHDR = [(p,p,p) for p in pixelsHDR]
+
+            ################ GENERATE IMAGE
+            fig = plt.figure(figsize=((width/100.0), (height/100.0)), dpi=100)
+            data = paper_figures.convertImage(pixelsHDR, height,
+                                                width, False)
+
+            # HARD CODED FOR NOW
+            minData = 0.0
+            maxData = 0.1
+
+            # --- Save the figure
+            cax = plt.figimage(data, vmin=minData, vmax=maxData)
+            fig.savefig(filenameIMG)#, bbox_inches=extent)
+
+            im = Image.open(filenameIMG)
+            (widthN, heightN) = im.size
+            im = im.crop(((widthN-width),
+                          (heightN-height), width, height))
+            im.save(filenameIMG)
+        else:
+            logger.critical("Unknown image type: %s. Cancel operation.", typeOp)
+            return black_img
+    return filenameIMG
 
 if __name__ == "__main__":
     #tracker = SummaryTracker()
-    
+
     # --- Read all params
     parser = optparse.OptionParser()
 
@@ -537,45 +870,45 @@ if __name__ == "__main__":
     parser.add_option('-m','--metric', help='Show RMSE plots', default=False, action="store_true")
     parser.add_option('-C','--clampTime', help='Clamp time into curves', default="-1")
     copyHDR = True
-    
+
     (opts, args) = parser.parse_args()
     exposure = int(opts.exposure)
     clampTime = int(opts.clampTime)
     step = int(opts.step) # Only usefull for curve generation
-    
+
     if(not os.path.exists(opts.input)):
-        print("Input path: "+opts.input+" not exists, QUIT")
+        logger.critical("Input path: "+opts.input+" not exists")
         sys.exit(3)
-    
+
     refPath = opts.input + os.path.sep + "Ref.hdr"
     (widthRef,heightRef),pRef = rgbe.io.read(refPath)
     wTot,hTot = widthRef,heightRef
-    
+
     if(opts.time == None):
-        print("Need to specified the time, QUIT")
+        logger.critical("Need to specified the time, QUIT")
         sys.exit(1)
-    
+
     if(opts.compare == ""):
-        print("Need the compare layout, QUIT")
+        logger.critical("Need the compare layout, QUIT")
         sys.exit(1)
 
     # Read all the configurations...
-    techDict, comp = readXMLComparisons(opts.compare)
-    curvesEntries, curvesSections = readXMLCurves(opts.compare)
+    techDict, comp = readXMLComparisons(opts, opts.compare)
+    curvesEntries, curvesSections = readXMLCurves(opts.compare, techDict)
 
-    print("Read all images files: "+opts.input)
-    
+    logger.info("Read all images files: "+opts.input)
+
     # --- Create directory if not exist
     if(not os.path.exists(opts.output)):
         os.makedirs(opts.output)
-    
+
     # In case of js directory redelete it
     # to be sure to always to be update
     pathJS = opts.output+"/js"
     if(os.path.exists(pathJS)):
         shutil.rmtree(pathJS)
     shutil.copytree(opts.jsdir, pathJS)
-    
+
     # === Convert file name
     otherImages = [("dx", "Abs X gradient", exposure+3, "dxAbs"),
                    ("dy", "Abs Y gradient", exposure+3, "dyAbs")]
@@ -586,49 +919,33 @@ if __name__ == "__main__":
         tech = techDict[t]
         filenameTime = tech.filenameTime(str(opts.time))
         filenameRefHDR = opts.input+os.path.sep+tech.reference.filenameTime(str(opts.time))+".hdr"
-
-        # Tone map
         filenameHDR = opts.input+os.path.sep+filenameTime+".hdr"
-        filenameIMG = opts.output+os.path.sep+filenameTime+".png"
-        # If the image is not found, do a special treatment
-        if(not os.path.exists(filenameHDR)):
-            print("NO HDR FILE FOUND FOR: "+filenameHDR)
-            # Use all black images
-            tech.images["tonemap"] = black_image
+
+        tech.images["tonemap"] = readImage(opts, black_image,
+                                           filenameHDR, filenameRefHDR,
+                                           opts.output+os.path.sep+filenameTime+".png",
+                                           "tonemap", exposure)
+        # Add error map (relMSE)
+        if(tech.isRef()):
+            tech.images["error"] = black_image
+        else:
+            tech.images["error"] = readImage(opts, black_image,
+                                             filenameHDR, filenameRefHDR,
+                                             opts.output+os.path.sep+filenameTime+"_error.png",
+                                             "error", exposure)
+
+        # Add bias image
+        if(tech.isRef()):
+            # No bias image need to be computed here
             tech.images["bias"] = black_image
-            for other in otherImages:
-                tech.images[other[0]] = black_image
-
-            continue
-
-        if(not opts.skip):
-            # Sometime, we do not want to generates the images...
-            # So we may want skip it !
-            (width,height),p = rgbe.io.read(filenameHDR)
-            rgbe.utils.applyExposureGamma(p, exposure, 2.2)
-
-            im = Image.new("RGB", (width,height))
-            rgbe.utils.copyPixeltoPIL(width, height, p, im)
-            print("Save "+filenameIMG)
-            im.save(filenameIMG, optimize=True)
-        tech.images["tonemap"] = filenameIMG
-
-        # Generate bias images
-        filenameIMG_BIAS = opts.output+os.path.sep+filenameTime+"_bias.png"
-        if(not opts.skip):
-            if(tech.isRef()):
-                # No bias image need to be computed here
-                filenameIMG_BIAS = black_image
-            else:
-                scaleNP = 1.0
-                if(exposure != 0.0):
-                    scaleNP = 1.0 / exposure
-                paper_figures.saveNPImageRef(filenameHDR,filenameRefHDR,filenameIMG_BIAS, scaleNP)
-        tech.images["bias"] = filenameIMG_BIAS
+        else:
+            tech.images["bias"] = readImage(opts, black_image,
+                                            filenameHDR, filenameRefHDR,
+                                            opts.output+os.path.sep+filenameTime+"_bias.png",
+                                            "bias", exposure)
 
         # Generate other images
-        for other in otherImages:
-            alias, desc, newExp, newPrefix = other
+        for alias, desc, newExp, newPrefix  in otherImages:
             if(tech.isRef()):
                 # No bias image need to be computed here
                 tech.images[alias] = black_image
@@ -636,28 +953,11 @@ if __name__ == "__main__":
 
             # Generate new file names
             filename = tech.filename+"_"+newPrefix+"_"+str(opts.time)
-            filenameHDR = opts.input+os.path.sep+filename+".hdr"
-            filenameIMG = opts.output+os.path.sep+filename+".png"
-
-            # If there is no HDR, associate a black image
-            if(not os.path.exists(filenameHDR)):
-                print("NO HDR FILE FOUND FOR: "+filenameHDR)
-                tech.images[alias] = black_image
-                continue
-
-            if(not opts.skip):
-                # Sometime, we do not want to generates the images...
-                # So we may want skip it !
-                (width,height),p = rgbe.io.read(filenameHDR)
-                rgbe.utils.applyExposureGamma(p, newExp, 2.2)
-
-                im = Image.new("RGB", (width,height))
-                rgbe.utils.copyPixeltoPIL(width, height, p, im)
-                print("Save "+filenameIMG)
-                im.save(filenameIMG, optimize=True)
-
-            tech.images[alias] = filenameIMG
-
+            tech.images[alias] = readImage(opts, black_image,
+                                           opts.input+os.path.sep+filename+".hdr",
+                                           filenameRefHDR,
+                                           opts.output+os.path.sep+filename+".png",
+                                           "tonemap", newExp)
 
     ################################################
     ################################################
@@ -667,15 +967,15 @@ if __name__ == "__main__":
     ################################################
     ################################################
 
-    print("Generate HTML ...")
+    logger.info("Generate HTML ...")
     htmlCode = htmlHead
     htmlCode = htmlCode.replace("%%%TITLEPAGE%%%", opts.name + " [" + str(opts.time) + "sec]")
     htmlCode = htmlCode.replace("%%%CAPTIONWIDTH%%%", str(int(wTot)*3 - 20))
-    
+
     htmlCode += "</head><body>"
     if(not PRODMOD):
         htmlCode += "Page generated: "+datetime.datetime.now().strftime("%A %d %Y, %Hpm")+"<br/>"
-    
+
     htmlCode += "<h2>HTML Results</h2>"
     htmlCode += '<p style="120%">'
     htmlCode += 'Scene name: ' + str(opts.name) + '<br/>'
@@ -689,6 +989,11 @@ if __name__ == "__main__":
         row.add(comparison4Way(c.techniques,"tonemap", opts.output,
                                wTot, hTot), "Rendered images")
 
+        # Error relMSE images
+        # Bias images
+        row.add(comparison4Way(c.techniques,"error", opts.output,
+                               wTot, hTot), "relative MSE (false color)")
+
         # Bias images
         row.add(comparison4Way(c.techniques,"bias", opts.output,
                                wTot, hTot), "Bias (N/P false color)")
@@ -699,24 +1004,24 @@ if __name__ == "__main__":
                                    wTot, hTot), imgSetup[1])
 
         htmlCode += row.generateHTML()
-        
+
         # === Inject description caption
         htmlCaptionNew = htmlCaption.replace("%%TITLE%%", c.title)
         if(c.desc == ""):
             htmlCaptionNew = htmlCaptionNew.replace("%%DESC%%", "")
         else:
             htmlCaptionNew = htmlCaptionNew.replace("%%DESC%%", "<br/>"+c.desc)
-        
+
         htmlCode += htmlCaptionNew
         htmlCode += "\n<br>\n"
 
     # Generate all the curves sections (if we want to)
     if(opts.metric):
         for section in curvesSections:
-            htmlCode += section.HTMLcode(opts.input, curvesEntries, opts.output, clampTime, step)
+            htmlCode += section.HTMLcode(opts.input, curvesEntries, opts.output, clampTime, step, techDict)
     else:
-        print("No curve generation requested... skip this part !")
-            
+        logger.warning("No curve generation requested... skip this part !")
+
     htmlCode += "\n</body>\n</html>"
     f = open(opts.output+os.path.sep+"index.html", "w")
     f.write(htmlCode)
