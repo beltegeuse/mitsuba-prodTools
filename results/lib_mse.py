@@ -51,9 +51,7 @@ def computeMSEAll(filename, nbImages, steps, finalImage, percentage = 1.0, outpu
     for output in outputs:
         f = open(output,'w')
         files.append(f)
-        
-    if(maskImg != ''):
-        raise Exception("Masked image are not handled yet")
+
 
     # Read reference image
     (w,h),pRef = rgbe.io.read(finalImage)
@@ -71,7 +69,13 @@ def computeMSEAll(filename, nbImages, steps, finalImage, percentage = 1.0, outpu
 
     # Launch the computation
     if(percentage == 1.0):
-        metrics = rgbe.fast.rmse_all_images(w,h, imagesHDR, pRef, mult, None)
+        maskData = []
+        if(maskImg != ""):
+            imMask = Image.open(maskImg)
+            imMaskData = imMask.getdata()
+            maskData = [p[0] != 255 for p in imMaskData]
+            print("Read mask", maskImg)
+        metrics = rgbe.fast.rmse_all_images(w,h, imagesHDR, pRef, mult, maskData)
     else:
         metrics = rgbe.fast.rmse_all_images_percentage(w,h, percentage, imagesHDR, pRef, mult)
 

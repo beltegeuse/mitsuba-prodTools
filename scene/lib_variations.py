@@ -1,4 +1,4 @@
-import os, sys, optparse
+import os, sys, optparse, shutil
 
 # Read the options
 parser = optparse.OptionParser()
@@ -6,7 +6,6 @@ parser.add_option('-i','--input', help='input root path (directory + scene name)
 parser.add_option('-r','--remove', help='remove files not used for variation', default=False, action="store_true")
 parser.add_option('-c','--config', help='config file')
 (opts, args) = parser.parse_args()
-
 
 import glob
 import xml.etree.ElementTree as ET
@@ -27,21 +26,50 @@ def generateNewXML(xmlFile, listAttr, out):
     # Write out the tree
     tree.write(out)
 
+class ConfigVariation:
+    def __init__(self, dict):
+        self.stealdir = dict["steal"]
+
+    @staticmethod
+    def XML(node):
+        d = {"steal" : ""}
+        for n in node:
+            if "TimeSteal" in n.tag:
+                d["steal"] = n.attrib["value"]
+
+        return ConfigVariation(d)
+
+
+    def apply(self, output_dir, techniques):
+        if self.stealdir != "":
+            complete_dir = output_dir + os.path.sep + self.stealdir + os.path.sep
+            for t in techniques:
+                if t.timesteal:
+                    for ori_tech in t.techniques:
+                        ori_time = complete_dir + ori_tech + "_time.csv"
+                        new_time = output_dir + os.path.sep + ori_tech + "_" + t.suffix + "_time.csv"
+                        shutil.copy(ori_time, new_time)
+
 class Change:
-    def __init__(self, techniques, suffix, listAttr):
+    def __init__(self, techniques, suffix, listAttr, timesteal = False):
         self.techniques = techniques
         self.suffix = suffix
         self.listAttr = listAttr
+        self.timesteal = timesteal
         
     @staticmethod
     def XML(node):
         techniques = node.attrib["techniques"].split(";")
         suffix = node.attrib["suffix"]
-        
+
+        timesteal = False
+        if "timesteal" in node.attrib:
+            timesteal = node.attrib["timesteal"] == "true"
+
         attribs = []
         for n in node:
             attribs.append(xmlEntry(n.tag, n.attrib["name"], n.attrib["value"]))
-        return Change(techniques, suffix, attribs)
+        return Change(techniques, suffix, attribs, timesteal)
     
     def apply(self, xml):
         out = xml.replace(".xml", "_"+self.suffix+".xml")
@@ -51,6 +79,7 @@ class Change:
     def __str__(self):
         s = "[ techniques: "+str(self.techniques)+", suffix: "+str(self.suffix)+"]"
         return s
+
 def loadConfig(configFile):
     # Get XML tree
     tree = ET.parse(configFile)
@@ -74,11 +103,16 @@ def loadConfig(configFile):
     for delected in sceneRoot.iter("Deleted"):
         deleteConfig.append(delected.attrib["name"])
         print("  *", delected.attrib["name"])
+
+    config = None
+    for n in sceneRoot.iter("Config"):
+        print("  *", "Load config...")
+        config = ConfigVariation.XML(n)
     
-    return (selectedConfig, changes, deleteConfig)
+    return (config, selectedConfig, changes, deleteConfig)
 
 # Read config files
-selected, changes, deletes = loadConfig(opts.config)
+config, selected, changes, deletes = loadConfig(opts.config)
 
 # List all xml files
 xmls = glob.glob(opts.input+"*.xml")
@@ -128,3 +162,11 @@ print("=================")
 
 for xml, base in xmlsLists:
     print(" *",base)
+
+if config:
+    print("=================")
+    print("=== Config ======")
+    print("=================")
+    output = os.path.sep.join(opts.input.split(os.path.sep)[:-1])
+    print(" - output:", output)
+    config.apply(output, changes)
