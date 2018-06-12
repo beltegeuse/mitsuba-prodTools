@@ -48,7 +48,10 @@ class ConfigVariation:
                     for ori_tech in t.techniques:
                         ori_time = complete_dir + ori_tech + "_time.csv"
                         new_time = output_dir + os.path.sep + ori_tech + "_" + t.suffix + "_time.csv"
-                        shutil.copy(ori_time, new_time)
+                        if os.path.exists(ori_time):
+                            shutil.copy(ori_time, new_time)
+                        else:
+                            print("  *", ori_time, "does not exists")
 
 class Change:
     def __init__(self, techniques, suffix, listAttr, timesteal = False):
