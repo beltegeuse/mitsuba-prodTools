@@ -1,14 +1,15 @@
 import optparse
 import glob
 import os
-import csv_utils
+import lib_csv
 import matplotlib.pyplot as plt
 from pylab import *
 import numpy as np
 import matplotlib.transforms as transforms
-import showResults
+import debug_show
 from matplotlib import rc, font_manager
 from decimal import *
+import xml.etree.ElementTree as ET
 
 class AlgorithmPlot:
     def __init__(self, name, metricBase, style, color, inFocus = True):
@@ -25,6 +26,7 @@ if __name__=="__main__":
     parser.add_option('-e','--errorName', help="type of plot (rmse_time or relative_time)", default="")
     parser.add_option('-t','--timelabel', help='Show time label', default=False, action="store_true")
     parser.add_option('-l','--uselog', help='Use log scale', default=False, action="store_true")
+    parser.add_option('-c','--config', help='config', default="")
     (opts, args) = parser.parse_args()
     
     #############################
@@ -34,34 +36,17 @@ if __name__=="__main__":
     #errorName = "rmse_time"
     #errorName = "relative_time"
     errorName = opts.errorName
-    algorithms = [ AlgorithmPlot("BRE",
-                                 "SPPM_a2m_bre",
-                                 "-", (56,53,238)),
-                   AlgorithmPlot("Distance",
-                                 "SPPM_a2m_distance",
-                                 "-",
-                                 (232,183,14)),
-                   AlgorithmPlot("G-BRE L1",
-                                 "GVPM_L1_a2m_bre_areaMIS_null",
-                                 "-",
-                                 (238,53,56)),
-                   AlgorithmPlot("G-Distance L1",
-                                 "GVPM_L1_a2m_distance_areaMIS_null",
-                                 "-",
-                                 (0,219,56))
-                  ]
 
-    # if we want to add L2
-    algorithms += [
-        AlgorithmPlot("G-BRE L2",
-                      "GVPM_L2_a2m_bre_areaMIS_null",
-                      "--",
-                      (238,53,56)),
-        AlgorithmPlot("G-Distance L2",
-                      "GVPM_L2_a2m_distance_areaMIS_null",
-                      "--",
-                      (0,219,56))
-    ]
+    #### Read config files
+    algorithms = []
+    tree = ET.parse(opts.config)
+    root = tree.getroot()
+
+    for cNode in root.iter('Curve'):
+        color = [int(e) for e in cNode.attrib["color"].split(",")]
+        algorithms += [
+            AlgorithmPlot(cNode.attrib["name"], cNode.attrib["filename"], cNode.attrib["style"], color)
+        ]
 
     extractedData = {}
     maxLenghtData = 0
@@ -74,7 +59,7 @@ if __name__=="__main__":
 
     # Read all the requested techniques
     # And copy the data values
-    techniques = showResults.readAllTechniques(requestedTech, opts.input, 5, False,  basey='_'+errorName+'.csv')
+    techniques = debug_show.readAllTechniques(requestedTech, opts.input, 5, False,  basey='_'+errorName+'.csv')
     for alg in algorithms:
         currentTech = None
         for tech in techniques:
@@ -117,7 +102,16 @@ if __name__=="__main__":
     maxyvalue = maxyvalueFocus = 0.01
 
     #yAxis = [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0] # GPM values
-    yAxis = [0.00001, 0.001, 0.1] # GVPM values
+    yAxis = [0.1, 1, 10]
+    for cNode in root.iter('yAxis'):
+        yAxis = [float(e) for e in cNode.attrib["values"].split(",")] # GVPM values
+    print("Read yAxis values:", yAxis)
+
+    xAxis = [60,300,1800]
+    for cNode in root.iter('xAxis'):
+        xAxis = [float(e) for e in cNode.attrib["values"].split(",")] # GVPM values
+    print("Read xAxis values:", xAxis)
+
 
     # For all the algorithm
     # Plot them
@@ -136,13 +130,13 @@ if __name__=="__main__":
     
         print("isLogLog = " + str(isLogLog))     
         if isLogLog:
-            ax.set_xlim(minxvalue,1800)
+            ax.set_xlim(minxvalue,xAxis[-1])
             lowerLimit = 0.1
             ax.set_ylim(0,maxyvalue+0.01)
             #ax.set_yscale('log')
             #ax.set_xscale('log')
             ax.loglog()
-            ax.set_xticks([60,300,1800]) # 1200
+            ax.set_xticks(xAxis) # 1200
 
             # If a time label is requested
             if(opts.timelabel):
@@ -154,7 +148,7 @@ if __name__=="__main__":
             ax.grid(color='black', linestyle='--', linewidth=2/3)
         else:
             print("No log is not implemented yet")
-            ax.set_xlim(minxvalue,1800)
+            ax.set_xlim(minxvalue,xAxis[-1])
             lowerLimit = 0
             if errorName == "rmse_time":
                 lowerLimit = 0.02
@@ -164,7 +158,7 @@ if __name__=="__main__":
             #ax.set_yscale('log')
             #ax.set_xscale('log')
             #ax.loglog()
-            ax.set_xticks([60,600,1800]) # 1200
+            ax.set_xticks(xAxis) # 1200
 
             # If a time label is requested
             if(opts.timelabel):

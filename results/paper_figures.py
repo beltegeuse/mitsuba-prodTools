@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 def copyPixeltoPIL(w, h, p, im):
-    clamp = lambda x : 255 if math.isnan(x) else int(x*255)
+    clamp = lambda x : 255 if math.isnan(x) else int(max(min(x, 1.0),0.0)*255)
     pInt = [(clamp(c[0]),clamp(c[1]),clamp(c[2])) for c in p]
     im.putdata(pInt)
 
