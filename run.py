@@ -123,7 +123,8 @@ if(opts.compute):
                "-m", opts.mitsuba, # Use this MTS
                "-s", str(maxTimeSec), # Rendering time
                "-i", currentScenePath + os.path.sep + opts.scenename,
-               "-o", currentScenePath + os.path.sep + "out" + opts.output
+               "-o", currentScenePath + os.path.sep + "out" + opts.output,
+               "-j", opts.jobs
                ]
     if(opts.cluster):
         print("[CLUSTER MODE]")
