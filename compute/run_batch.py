@@ -11,6 +11,9 @@ def kill(proc_pid):
     for proc in process.children(recursive=True):
         proc.kill()
     process.kill()
+
+# TODO: Use it as a parameters
+CLUSTER_MODE = "todai"
 		
 if __name__=="__main__":
     # Options
@@ -80,30 +83,108 @@ if __name__=="__main__":
         command += ["-z"]
 
         if(options.cluster):
-            print("[CLUSTER] Submit the job")
-            TMP_FILE = "/tmp/cluster_tmp_command.sh"
-            fileCommand = open(TMP_FILE, "w")
-            fileCommand.write("#!/bin/sh\n")
-            fileCommand.write("\n")
+            if CLUSTER_MODE == "mcgills":
+                if (int(options.jobs) != 12):
+                    raise "With mcgill cluster, only 12 thread at a time is possible."
 
-            # Write time limit
-            minutesTask = int(options.time) // 60
-            secondsTaks = int(options.time) % 60
-            fileCommand.write("#SBATCH --time="+str(minutesTask)+":"+str(secondsTaks)+"\n")
+                ## Cluster which use torque
+                ## target only westmere
+                TMP_FILE = "/home/neodym60/scratch/cluster_tmp_command.sh"
+                fileCommand = open(TMP_FILE, "w")
+                fileCommand.write("#!/bin/sh\n")
+                fileCommand.write("\n")
 
-            # Number of threads
-            fileCommand.write("#SBATCH --ntasks=1\n")
-            fileCommand.write("#SBACTH --cpus-per-task=12\n")
+                # Number of threads
+                # force to use all the thread on westmere (SW) nodes
+                fileCommand.write("#PBS -l nodes=1:ppn=12:westmere\n")
+                fileCommand.write("#PBS -A YOURCODE\n")
 
-            # The main command
-            fileCommand.write("\n")
-            fileCommand.write("srun "+" ".join(command)+"\n")
+                # Redirect regular output (+error)
+                fileCommand.write("#PBS -o "+options.output + os.path.sep + tech + ".out\n")
+                fileCommand.write("#PBS -e "+options.output + os.path.sep + tech + ".err\n")
 
-            # Run the file on the cluster
-            fileCommand.close()
-            clusterCommand = ["sbatch",TMP_FILE]
-            process = subprocess.run(clusterCommand,shell=False,stdout=subprocess.PIPE)
-            print(process)
+                # Write the time
+                minutesTask = int(options.time) // 60
+                secondsTaks = int(options.time) % 60
+                fileCommand.write("#PBS -l walltime=00:" + str(minutesTask) + ":" + str(secondsTaks) + "\n")
+
+                # Add the task (mitsuba call)
+                fileCommand.write("\n")
+                fileCommand.write('MITSUBA_DIR="' + str(os.path.dirname(options.mitsuba)) + '"\n')
+                fileCommand.write('export LD_LIBRARY_PATH="$MITSUBA_DIR:$LD_LIBRARY_PATH"\n')
+                fileCommand.write('export PATH="$MITSUBA_DIR:$PATH"\n')
+                fileCommand.write(" ".join(command) + "\n")
+
+                # Run the file on the cluster
+                fileCommand.close()
+                clusterCommand = ["qsub", TMP_FILE]
+                # process = subprocess.run(clusterCommand,shell=False,stdout=subprocess.PIPE)
+                proc = subprocess.check_output(clusterCommand, shell=False)
+                print(proc)
+            elif CLUSTER_MODE == "todai":
+                if (int(options.jobs) != 18):
+                    raise "With todai cluster, only 18 thread at a time is possible. (for now)"
+
+                ## This are the command for the hand made cluster
+                ## based on slurm
+                print("[CLUSTER] Submit the job")
+                TMP_FILE = "/home/u00068/cluster_tmp_command.sh"
+                fileCommand = open(TMP_FILE, "w")
+                fileCommand.write("#!/bin/sh\n")
+                fileCommand.write("\n")
+
+                # Write time limit
+                minutesTask = int(options.time) // 60
+                secondsTaks = int(options.time) % 60
+                fileCommand.write("#SBATCH --time=" + str(minutesTask) + ":" + str(secondsTaks) + "\n")
+
+                # Number of threads and the target node
+                fileCommand.write("#SBATCH --ntasks=1\n")
+                fileCommand.write("#SBATCH --cpus-per-task=18\n")
+                fileCommand.write("#SBATCH --partition=p\n")
+
+                # Redirect the outputs
+                fileCommand.write("#SBATCH -o "+options.output + os.path.sep + tech + ".out\n")
+                fileCommand.write("#SBATCH -e "+options.output + os.path.sep + tech + ".err\n")
+
+
+                # The main command
+                fileCommand.write("\n")
+                fileCommand.write("srun " + " ".join(command) + "\n")
+
+                # Run the file on the cluster
+                fileCommand.close()
+                clusterCommand = ["sbatch", TMP_FILE]
+                process = subprocess.run(clusterCommand, shell=False, stdout=subprocess.PIPE)
+            elif CLUSTER_MODE == "custom":
+                ## This are the command for the hand made cluster
+                ## based on slurm
+                print("[CLUSTER] Submit the job")
+                TMP_FILE = "/tmp/cluster_tmp_command.sh"
+                fileCommand = open(TMP_FILE, "w")
+                fileCommand.write("#!/bin/sh\n")
+                fileCommand.write("\n")
+
+                # Write time limit
+                minutesTask = int(options.time) // 60
+                secondsTaks = int(options.time) % 60
+                fileCommand.write("#SBATCH --time=" + str(minutesTask) + ":" + str(secondsTaks) + "\n")
+
+                # Number of threads
+                fileCommand.write("#SBATCH --ntasks=1\n")
+                fileCommand.write("#SBACTH --cpus-per-task=12\n")
+
+                # The main command
+                fileCommand.write("\n")
+                fileCommand.write("srun " + " ".join(command) + "\n")
+
+                # Run the file on the cluster
+                fileCommand.close()
+                clusterCommand = ["sbatch", TMP_FILE]
+                process = subprocess.run(clusterCommand, shell=False, stdout=subprocess.PIPE)
+                print(process)
+            else:
+                raise "bad cluster configuration selection"
         else:
             print("[DEBUG] Run computation for", tech)
             # Start foo as a process
