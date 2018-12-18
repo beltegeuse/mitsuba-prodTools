@@ -10,7 +10,7 @@ except ImportError:
     from PIL import Image
 
 # CSV based name files
-CSVNames = ["_mse.csv", "_rmse.csv", "_mseLog.csv", "_rmseLog.csv", "_tvi.csv", "_relative.csv", "_relMSE.csv"]
+CSVNames = ["_mse.csv", "_rmse.csv", "_mseLog.csv", "_rmseLog.csv", "_tvi.csv", "_relative.csv", "_relMSE.csv", "_SMAPE.csv"]
 
 # === Constants
 def diffImageRef(currImage, pRef, mult, metricType, maskImage = "", outputImage = ""):

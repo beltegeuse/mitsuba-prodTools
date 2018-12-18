@@ -118,7 +118,7 @@ class MetricOp:
         mult = float(math.pow(2, float(self.exposure)))
         images = [wk + os.path.sep + self.img]
         errors = rgbe.fast.rmse_all_images(w,h, images, pRef, mult, maskData)[0]
-        errorsNames = ["mse", "rmse", "mseLog", "rmseLog", "tvi", "relative", "relMSE"]
+        errorsNames = ["mse", "rmse", "mseLog", "rmseLog", "tvi", "relative", "relMSE", "SMAPE"]
         print("MULT:", mult)
         logger.info("Metric for "+self.img+" ( with "+self.ref+") MULT: "+str(mult))
         for i in range(len(errors)):
