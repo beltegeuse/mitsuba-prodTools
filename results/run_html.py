@@ -816,8 +816,11 @@ def readImage(opts, black_img,
             pRef = [paper_figures.lum(p) for p in pRef]
             pixelsHDR = [paper_figures.lum(p) for p in pixelsHDR]
             # --- Compute relative error
+            #for i in range(len(pRef)):
+            #    pixelsHDR[i] = 0.0 if pRef[i] == 0.0 else abs(pRef[i] - pixelsHDR[i])/pRef[i]
+            # --- Compute SMAPE
             for i in range(len(pRef)):
-                pixelsHDR[i] = 0.0 if pRef[i] == 0.0 else abs(pRef[i] - pixelsHDR[i])/pRef[i]
+               pixelsHDR[i] = 0.0 if pRef[i]+pixelsHDR[i] == 0.0 else 2.0*abs(pRef[i] - pixelsHDR[i])/(pRef[i] + pixelsHDR[i])
             # --- Remake 3 channel
             pixelsHDR = [(p,p,p) for p in pixelsHDR]
 
