@@ -13,7 +13,7 @@ def kill(proc_pid):
     process.kill()
 
 # TODO: Use it as a parameters
-CLUSTER_MODE = "todai"
+CLUSTER_MODE = "mcgill"
 		
 if __name__=="__main__":
     # Options
@@ -83,33 +83,43 @@ if __name__=="__main__":
         command += ["-z"]
 
         if(options.cluster):
-            if CLUSTER_MODE == "mcgills":
-                if (int(options.jobs) != 12):
-                    raise "With mcgill cluster, only 12 thread at a time is possible."
+            if CLUSTER_MODE == "mcgill":
+                if (int(options.jobs) != 32):
+                    raise "With mcgill cluster, only 32 thread at a time is possible."
 
                 ## Cluster which use torque
                 ## target only westmere
-                TMP_FILE = "/home/neodym60/scratch/cluster_tmp_command.sh"
+                TMP_FILE = "/home/agruson/cluster_tmp_command.sh"
                 fileCommand = open(TMP_FILE, "w")
                 fileCommand.write("#!/bin/sh\n")
                 fileCommand.write("\n")
 
-                # Number of threads
+                # Number of threads (Old configuration)
                 # force to use all the thread on westmere (SW) nodes
-                fileCommand.write("#PBS -l nodes=1:ppn=12:westmere\n")
-                fileCommand.write("#PBS -A YOURCODE\n")
-
+                #fileCommand.write("#PBS -l nodes=1:ppn=32\n")
+                #fileCommand.write("#PBS --account=def-dnowrouz\n")
                 # Redirect regular output (+error)
-                fileCommand.write("#PBS -o "+options.output + os.path.sep + tech + ".out\n")
-                fileCommand.write("#PBS -e "+options.output + os.path.sep + tech + ".err\n")
-
+                #fileCommand.write("#PBS -o "+options.output + os.path.sep + tech + ".out\n")
+                #fileCommand.write("#PBS -e "+options.output + os.path.sep + tech + ".err\n")
                 # Write the time
                 minutesTask = int(options.time) // 60
                 secondsTaks = int(options.time) % 60
-                fileCommand.write("#PBS -l walltime=00:" + str(minutesTask) + ":" + str(secondsTaks) + "\n")
+                #fileCommand.write("#PBS -l walltime=00:" + str(minutesTask) + ":" + str(secondsTaks) + "\n")
+                fileCommand.write("#SBATCH --time=" + str(minutesTask) + ":" + str(secondsTaks) + "\n")
 
+                # Number of threads and the target node                                                                                                                                                           
+                fileCommand.write("#SBATCH --ntasks=1\n")
+                fileCommand.write("#SBATCH --cpus-per-task=32\n")
+                fileCommand.write("#SBATCH --account=def-dnowrouz\n")
+                
+                # Redirect the outputs                                                                                                                                                                            
+                fileCommand.write("#SBATCH -o "+options.output + os.path.sep + tech + ".out\n")
+                fileCommand.write("#SBATCH -e "+options.output + os.path.sep + tech + ".err\n")
+                
                 # Add the task (mitsuba call)
                 fileCommand.write("\n")
+                fileCommand.write("module load boost\n")
+                fileCommand.write("module load eigen\n")
                 fileCommand.write('MITSUBA_DIR="' + str(os.path.dirname(options.mitsuba)) + '"\n')
                 fileCommand.write('export LD_LIBRARY_PATH="$MITSUBA_DIR:$LD_LIBRARY_PATH"\n')
                 fileCommand.write('export PATH="$MITSUBA_DIR:$PATH"\n')
@@ -117,7 +127,7 @@ if __name__=="__main__":
 
                 # Run the file on the cluster
                 fileCommand.close()
-                clusterCommand = ["qsub", TMP_FILE]
+                clusterCommand = ["sbatch", TMP_FILE]
                 # process = subprocess.run(clusterCommand,shell=False,stdout=subprocess.PIPE)
                 proc = subprocess.check_output(clusterCommand, shell=False)
                 print(proc)
