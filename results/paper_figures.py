@@ -193,13 +193,23 @@ class CropOp(BoxOp):
 
         return im2
 
+class CropOpPattern:
+    def __init__(self):
+        self.vertical = True
+
+    def readXML(self, n):
+        self.vertical = n.attrib['vertical']
+
+    def apply(self, im, w, h):
+       raise "Unimplemeted"
+
 class ImageOp(object):
     def __init__(self):
         self.expo = 0
         self.input = ""
         self.output = ""
         self.actions = []
-        self.gamma = 2.2
+        self.gamma = 1.0
 
         # Other options
         self.autoscale = False
@@ -236,7 +246,9 @@ class ImageOp(object):
             b = CropOp()
             b.readXML(bXML)
             self.actions.append(b)
-
+        for bXML in n.iter('CropPattern'):
+            pass
+            
     def getImg(self,wk):
         return wk + os.path.sep + self.input
 
@@ -263,6 +275,7 @@ class ImageOp(object):
             for i in range(len(self.pixelsHDR)):
                 r,g,b = self.pixelsHDR[i]
                 self.pixelsHDR[i] = (r*factor, g*factor, b*factor)
+
     def loadIm(self):
         logger.debug("Simple load")
         self.im = Image.new("RGB", (self.width,self.height))
@@ -370,11 +383,22 @@ class ImageFalseColorDiffOp(ImageFalseColorOp):
     def __init__(self):
         ImageFalseColorOp.__init__(self)
         self.ref = ""
+        self.metric = None
 
     def readXML(self, n):
         ImageFalseColorOp.readXML(self, n)
         self.ref = n.attrib["ref"]
-
+        if "metric" in n.attrib:
+            if n.attrib['metric'] == 'smape':
+                self.metric = 'smape'
+            elif n.attrib['metric'] == 'mse':
+                self.metric = 'mse'
+            elif n.attrib['metric'] == 'diff':
+                self.metric = 'diff'
+            else:
+                raise "Unknow metric: %s".format(n.attrib['metric'])
+        else:
+            raise "'metric' need to be specified"
     def loadHDR(self, wk):
         ImageFalseColorOp.loadHDR(self, wk)
 
@@ -388,9 +412,15 @@ class ImageFalseColorDiffOp(ImageFalseColorOp):
         self.pixelsHDR = [lum(p) for p in self.pixelsHDR]
 
         # --- Compute relative error
-        for i in range(len(pRef)):
-            self.pixelsHDR[i] = 0.0 if pRef[i] == 0.0 else abs(pRef[i] - self.pixelsHDR[i])/pRef[i]
-
+        if self.metric == 'smape':
+            for i in range(len(pRef)):
+                self.pixelsHDR[i] = 0.0 if pRef[i] == 0.0 else abs(pRef[i] - self.pixelsHDR[i])/pRef[i]
+        elif self.metric == 'mse':
+            for i in range(len(pRef)):
+                self.pixelsHDR[i] = math.pow(pRef[i] - self.pixelsHDR[i], 2)
+        elif self.metric == 'diff':
+            for i in range(len(pRef)):
+                self.pixelsHDR[i] = abs(pRef[i] - self.pixelsHDR[i])
         #maxError = max(self.pixelsHDR)
         #self.pixelsHDR = [maxError if p == 0 else p for p in self.pixelsHDR]
 
