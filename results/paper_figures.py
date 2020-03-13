@@ -20,6 +20,8 @@ except ImportError:
     from PIL import Image
     from PIL import ImageDraw
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 
@@ -108,22 +110,40 @@ class MetricOp:
         self.exposure = int(n.attrib["exposure"])
 
     def show(self, wk):
-        (w,h),pRef = rgbe.io.read(wk + os.path.sep + self.ref)
+        # --- Load reference
+        (wRef,hRef),pixelsHDR = rgbe.io.read(wk + os.path.sep + self.img)
+        (wRef,hRef),pRef = rgbe.io.read(wk + os.path.sep + self.ref)
+        if(self.exposure != 0.0):
+            rgbe.utils.applyExposureGamma(pRef, self.exposure, 1.0)
+            rgbe.utils.applyExposureGamma(pixelsHDR, self.exposure, 1.0)
 
-        maskData = []
-        if(self.mask != ""):
-            imMask = Image.open(wk + os.path.sep + self.mask)
-            imMaskData = imMask.getdata()
-            maskData = [p[0] != 255 for p in imMaskData]
-        mult = float(math.pow(2, float(self.exposure)))
-        images = [wk + os.path.sep + self.img]
-        errors = rgbe.fast.rmse_all_images(w,h, images, pRef, mult, maskData)[0]
-        errorsNames = ["mse", "rmse", "mseLog", "rmseLog", "tvi", "relative", "relMSE", "SMAPE"]
-        print("MULT:", mult)
-        logger.info("Metric for "+self.img+" ( with "+self.ref+") MULT: "+str(mult))
-        for i in range(len(errors)):
-            logger.info(errorsNames[i],":",errors[i])
+        # --- Change data to compute norm
+        ref = np.array([lum(p) for p in pRef])
+        test = np.array([lum(p) for p in pixelsHDR])
 
+        diff = np.array(ref - test)
+        eps = 1e-2
+
+        metrics = {}
+        metrics["l1"] = np.abs(diff)
+        metrics["l2"] = diff * diff
+        metrics["mrse"] = diff * diff / (ref * ref + eps)
+        metrics["mape"] = np.abs(diff) / (ref + eps)
+        metrics["smape"] = np.abs(diff) / (ref + test)
+        metrics["smape"][ref == 0] = 0.0
+
+
+        # --- Compute relative error
+        # Previous code:
+        # smape = 0.0
+        # for i in range(len(pRef)):
+        #     smape += abs(pRef[i] - pixelsHDR[i])/(pRef[i] + 0.01)
+        # smape /= (wRef*hRef)
+
+
+        print("Metric for "+self.img+" ( with "+self.ref+")")
+        for (n, v) in metrics.items():
+            print(n, ":", sum(v)/(wRef*hRef))
 
 class BoxOp:
     def __init__(self):
@@ -305,7 +325,7 @@ class ImageFalseColorOp(ImageOp):
         self.pMax = -1
         self.pMin = -1
         self.cmap = cm.get_cmap("viridis")
-
+        self.log = False
     def readXML(self, n):
         ImageOp.readXML(self, n)
         if "min" in n.attrib:
@@ -316,11 +336,21 @@ class ImageFalseColorOp(ImageOp):
             self.pMax = float(n.attrib["pMax"])
         if "pMin" in n.attrib:
             self.pMin = float(n.attrib["pMin"])
+        if "log" in n.attrib:
+            self.log = n.attrib["log"] == "true"
         self.inverse = (n.attrib["inverse"] == "true")
+
+        if "colormap" in n.attrib:
+            self.cmap = cm.get_cmap(n.attrib["colormap"])
 
     def loadIm(self):
         logger.debug("Complex load")
         fig = plt.figure(figsize=((self.width/100.0), (self.height/100.0)), dpi=100)
+
+        if(self.log):
+            self.pixelsHDR = [(math.log(1.0 + p[0]),math.log(1.0 + p[0]),math.log(1.0 + p[0])) for p in self.pixelsHDR]
+    
+
         data = convertImage(self.pixelsHDR, self.height,
                             self.width, self.inverse)
 
@@ -333,13 +363,13 @@ class ImageFalseColorOp(ImageOp):
         maxData = pRefLum[-1]
         minData = pRefLum[0]
 
-        logger.info("Find the min/max: ",str(minData),str(maxData))
+        print("Find the min/max: ",str(minData),str(maxData))
 
 
-        if(self.pMax != -1):
-            maxData = pRefLum[int(len(pRefLum)*self.pMax)]
-        if(self.pMin != -1):
-            minData = pRefLum[int(len(pRefLum)*self.pMin)]
+        # if(self.pMax != -1):
+        #     maxData = pRefLum[int(len(pRefLum)*self.pMax)]
+        # if(self.pMin != -1):
+        #     minData = pRefLum[int(len(pRefLum)*self.pMin)]
 
         if self.minV != -10000.005454:
             minData = self.minV
